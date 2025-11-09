@@ -12,9 +12,9 @@ type Manager struct {
 }
 
 // NewManager 创建新的配置管理器
-func NewManager() *Manager {
+func NewManager(apiClient *api.Client) *Manager {
 	return &Manager{
-		client: api.NewClient(),
+		client: apiClient,
 	}
 }
 

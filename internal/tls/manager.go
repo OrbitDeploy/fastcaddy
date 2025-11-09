@@ -16,10 +16,10 @@ type Manager struct {
 }
 
 // NewManager 创建新的 TLS 管理器
-func NewManager() *Manager {
+func NewManager(apiClient *api.Client, configManager *config.Manager) *Manager {
 	return &Manager{
-		client:        api.NewClient(),
-		configManager: config.NewManager(),
+		client:        apiClient,
+		configManager: configManager,
 	}
 }
 

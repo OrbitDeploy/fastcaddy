@@ -17,12 +17,16 @@ type Client struct {
 }
 
 // NewClient 创建新的 Caddy API 客户端
-func NewClient() *Client {
-	return &Client{
-		BaseURL: "http://localhost:2019",
-		HTTPClient: &http.Client{
+// 它可以接受一个外部的 http.Client，如果传入 nil，则会创建一个默认的客户端。
+func NewClient(httpClient *http.Client) *Client {
+	if httpClient == nil {
+		httpClient = &http.Client{
 			Timeout: 30 * time.Second,
-		},
+		}
+	}
+	return &Client{
+		BaseURL:    "http://localhost:2019",
+		HTTPClient: httpClient,
 	}
 }
 

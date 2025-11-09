@@ -1,30 +1,77 @@
 package fastcaddy
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"time"
+
 	"github.com/OrbitDeploy/fastcaddy/internal/api"
 	"github.com/OrbitDeploy/fastcaddy/internal/config"
 	"github.com/OrbitDeploy/fastcaddy/internal/routes"
 	"github.com/OrbitDeploy/fastcaddy/internal/tls"
 	"github.com/OrbitDeploy/fastcaddy/internal/utils"
+	"golang.org/x/crypto/ssh"
 )
 
 // FastCaddy 主要客户端 - 提供 Caddy 配置管理的统一接口
 // 这是主要的入口点，整合了所有功能模块
 type FastCaddy struct {
-	API    *api.Client     // API 客户端
-	Config *config.Manager // 配置管理器
-	TLS    *tls.Manager    // TLS 管理器
-	Routes *routes.Manager // 路由管理器
+	API       *api.Client     // API 客户端
+	Config    *config.Manager // 配置管理器
+	TLS       *tls.Manager    // TLS 管理器
+	Routes    *routes.Manager // 路由管理器
+	sshClient *ssh.Client     // 用于隧道通信的 SSH 客户端 (可选)
+}
+
+// createSSHHTTPClient 创建一个使用 SSH 隧道作为 Transport 的 http.Client
+func createSSHHTTPClient(sshClient *ssh.Client) *http.Client {
+	// Caddy Admin API 在远程服务器上的地址
+	remoteAdminAddr := "127.0.0.1:2019"
+
+	// 创建一个自定义的 http.Transport
+	sshTransport := &http.Transport{
+		// 重写 DialContext 方法
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// 忽略传入的 network 和 addr，强制通过 SSH 隧道连接
+			return sshClient.Dial("tcp", remoteAdminAddr)
+		},
+	}
+
+	return &http.Client{
+		Transport: sshTransport,
+		Timeout:   30 * time.Second,
+	}
 }
 
 // New 创建新的 FastCaddy 客户端实例
-func New() *FastCaddy {
-	return &FastCaddy{
-		API:    api.NewClient(),
-		Config: config.NewManager(),
-		TLS:    tls.NewManager(),
-		Routes: routes.NewManager(),
+func New(opts ...Option) *FastCaddy {
+	fc := &FastCaddy{}
+
+	// 1. 应用所有传入的选项 (例如，注入 ssh.Client)
+	for _, opt := range opts {
+		opt(fc)
 	}
+
+	// 2. 根据是否存在 ssh.Client，决定使用哪个 http.Client
+	var httpClient *http.Client
+	if fc.sshClient != nil {
+		// 如果有 SSH 客户端，则创建一个通过 SSH 隧道的 HTTP 客户端
+		httpClient = createSSHHTTPClient(fc.sshClient)
+	}
+	// 如果没有 ssh.Client，httpClient 将为 nil，api.NewClient 内部会创建默认的 http.Client
+
+	// 3. 创建一个统一的、可共享的 api.Client 和 config.Manager
+	sharedAPIClient := api.NewClient(httpClient)
+	sharedConfigManager := config.NewManager(sharedAPIClient)
+
+	// 4. 使用共享的客户端实例来初始化所有管理器
+	fc.API = sharedAPIClient
+	fc.Config = sharedConfigManager
+	fc.TLS = tls.NewManager(sharedAPIClient, sharedConfigManager)
+	fc.Routes = routes.NewManager(sharedAPIClient, sharedConfigManager)
+
+	return fc
 }
 
 // SetupCaddy 设置 Caddy 基本配置 - 对应 Python 的 setup_caddy 函数
